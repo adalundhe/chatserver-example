@@ -1,0 +1,21 @@
+
+syntax = "proto3";
+
+package user;
+import "google/protobuf/empty.proto";
+
+message UserName {
+    string name = 1;
+}
+
+message User {
+    string id = 1;
+    string name = 2;
+    repeated string tokens = 3;
+}
+
+service Users {
+    rpc GetUser(stream UserName) returns (stream User) {};
+    rpc CreateOrUpdateUser(stream User) returns (stream UserName) {};
+    rpc DeleteUser(stream UserName) returns (stream google.protobuf.Empty) {};
+}

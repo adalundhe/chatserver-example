@@ -1,0 +1,24 @@
+
+syntax = "proto3";
+
+package user;
+import "google/protobuf/empty.proto";
+
+
+message RoomName {
+    string name = 1;
+    optional string token = 2;
+}
+
+message Room {
+    string id = 1;
+    string name = 2;
+    string token = 3;
+}
+
+
+service Rooms {
+    rpc GetRoom(stream RoomName) returns (stream Room) {};
+    rpc CreateOrUpdateRoom(stream Room) returns (stream RoomName) {};
+    rpc DeleteRoom(stream RoomName) returns (stream google.protobuf.Empty) {};
+}

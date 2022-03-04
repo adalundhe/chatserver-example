@@ -4,6 +4,10 @@ import { createServer, Server } from 'http';
 import cors from 'cors';
 import { ChatEvent } from "../constants/chat";
 import { Message } from "../types/chat";
+import { User } from "../types/user";
+import { UserServiceClient } from "./UserServiceClient";
+import { RoomServiceClient } from "./RoomServiceClient";
+
 
 export class ChatService {
     public static readonly PORT: number = 8000;
@@ -11,22 +15,25 @@ export class ChatService {
     private server: Server;
     private io: SocketIOServer;
     private port: string | number;
+    private userClient: UserServiceClient;
+    private roomClient: RoomServiceClient;
 
     constructor(){
-
-        const allowedOrigins = ['*'];
-
-        const options: cors.CorsOptions = {
-            origin: allowedOrigins
-        };
-
         this._app = express();
 
         this.port = process.env.PORT || ChatService.PORT;
-        
-        this._app.use(cors(options));
+
+        this._app.use(cors());
         this.server = createServer(this._app);
-        this.io = new SocketIOServer(this.server);
+        this.io = new SocketIOServer(this.server, {
+            cors: {
+                origin: "http://localhost:3000",
+                methods: ["GET", "POST"]
+            }
+          });
+
+        this.userClient = new UserServiceClient();
+        this.roomClient = new RoomServiceClient();
     }
 
     
@@ -35,18 +42,61 @@ export class ChatService {
         await this.server.listen(this.port);
         console.log(`Server running on port: ${this.port}. `);
 
-        await this.io.on(ChatEvent.CONNECT, async (socket) => {
+        await this.io.use(async (socket, next) => {
+                if (socket.handshake.auth.token){
+                    await this.roomClient.getRoom({
+                        roomName: socket.handshake.query.room as string,
+                        token: socket.handshake.auth.token,
+                        callback: async (room) => {
+                            if (room.token !== socket.handshake.auth.token){
+                                next(new Error('Unauthorized.'))
+                            }
+                            
+                            next()
+                        }
+                    });
+                }
+                else {
+                    next(new Error('Unauthorized.'));
+                }
+
+            });
+            
+        await this.io.on(ChatEvent.CONNECT, (socket) => {
             console.log(`Client connected on port: ${this.port}`);
 
-            await socket.on(ChatEvent.MESSAGE, async (message: Message) => {
-                await this.io.emit('message', message)
+            socket.on(ChatEvent.REGISTER, async (user: User) => {
+
+                await this.userClient.createOrUpdateUser({
+                    user,
+                    callback: async (userName: string) => {
+                        await this.io.to(user.currentRoom as string).emit('register',`User ${userName} registered.`)
+                    }
+                });
             });
 
-            await socket.on(ChatEvent.DISCONNECT, async () => {
+            socket.on(ChatEvent.JOIN, async (user: User) => {   
+                await socket.join(user.currentRoom);
+                await this.io.to(user.currentRoom as string).emit('join', `${user.name} joined room ${user.currentRoom}`);
+    
+            });
+
+            socket.on(ChatEvent.MESSAGE, async (message: Message) => {
+                await this.io.to(message.room).emit('message', `${new Date().toISOString()} - ${message.user}: ${message.message}`);
+                
+            });
+
+            socket.on(ChatEvent.LEAVE, async (user: User) => {
+                await this.io.to(user.currentRoom as string).emit('leave', `User - ${user.name} - left room.`);
+                await socket.disconnect();
+            });
+
+            socket.on(ChatEvent.DISCONNECT, async () => {
                 console.log('Client disconnected.')
-            })
+            });
 
         });
+
     }
 
     get app(): express.Application {
