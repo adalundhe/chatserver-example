@@ -72,6 +72,8 @@ export class ChatService {
 
             socket.on(ChatEvent.REGISTER, async (user: User) => {
 
+                const messageString = `${new Date().toISOString()} - ${user.name} is here!.`;
+
                 await this.userClient.createOrUpdateUser({
                     user,
                     callback: async (userName: string) => {
@@ -79,13 +81,13 @@ export class ChatService {
                             topic: user.currentRoom as string,
                             message: {
                                 id: uuidv4(),
-                                user: user.name,
-                                message: `User ${user.name} registered.`,
+                                user: userName,
+                                message: messageString,
                                 room: user.currentRoom as string
                             }
                         });
 
-                        await this.io.to(user.currentRoom as string).emit('register',`User ${userName} registered.`)
+                        await this.io.to(user.currentRoom as string).emit(ChatEvent.REGISTER, messageString);
                     }
                 });
 
@@ -99,12 +101,12 @@ export class ChatService {
                     message: {
                         id: uuidv4(),
                         user: user.name,
-                        message: `${user.name} joined room ${user.currentRoom}`,
+                        message: `${new Date().toISOString()} - ${user.name} joined room ${user.currentRoom}`,
                         room: user.currentRoom as string
                     }
                 });
 
-                await this.io.to(user.currentRoom as string).emit('join', `${user.name} joined room ${user.currentRoom}`);
+                await this.io.to(user.currentRoom as string).emit(ChatEvent.JOIN, `${user.name} joined room ${user.currentRoom}`);
     
             });
 
@@ -122,13 +124,16 @@ export class ChatService {
                 });
 
 
-                await this.io.to(message.room).emit('message', messageString);
+                await this.io.to(message.room).emit(ChatEvent.MESSAGE, messageString);
                 
             });
 
             socket.on(ChatEvent.LEAVE, async (user: User) => {
 
-                const messageString = `User - ${user.name} - left room.`;
+                const messageString = `${new Date().toISOString()} - ${user.name} - left room.`;
+
+                console.log(user.currentRoom)
+                await this.io.to(user.currentRoom as string).emit(ChatEvent.LEAVE, messageString);
                 await this.kafka.produce({
                     topic: user.currentRoom as string,
                     message: {
@@ -139,7 +144,6 @@ export class ChatService {
                     }
                 });
 
-                await this.io.to(user.currentRoom as string).emit('leave', messageString);
                 await socket.disconnect();
             });
 

@@ -16,6 +16,9 @@ COPY --from=build-node-modules /opt/app/node_modules node_modules
 
 COPY ./ /opt/app
 
+WORKDIR /opt/app
+
+RUN NODE_ENV=production npm run build:proto
 RUN NODE_ENV=production npm run build
 
 ##############################################
@@ -25,6 +28,7 @@ FROM node:12.22.5-buster-slim AS run
 
 ENV NODE_ENV production
 
+WORKDIR /opt/app
 
 RUN addgroup --gid 500 --system twilio \
 	&& adduser --uid 500 --system twilio \
@@ -40,3 +44,4 @@ USER twilio
 
 EXPOSE 8000
 
+CMD [ "npm", "run", "start:prod" ]
