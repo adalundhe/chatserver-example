@@ -7,6 +7,8 @@ import { Message } from "../types/chat";
 import { User } from "../types/user";
 import { UserServiceClient } from "./UserServiceClient";
 import { RoomServiceClient } from "./RoomServiceClient";
+import { KafkaServer } from "./KafkaServer";
+import { v4 as uuidv4 } from "uuid";
 
 
 export class ChatService {
@@ -17,6 +19,7 @@ export class ChatService {
     private port: string | number;
     private userClient: UserServiceClient;
     private roomClient: RoomServiceClient;
+    private kafka: KafkaServer;
 
     constructor(){
         this._app = express();
@@ -34,11 +37,13 @@ export class ChatService {
 
         this.userClient = new UserServiceClient();
         this.roomClient = new RoomServiceClient();
+        this.kafka = new KafkaServer({});
     }
 
     
 
     async listen (): Promise<void> {
+        await this.kafka.connect();
         await this.server.listen(this.port);
         console.log(`Server running on port: ${this.port}. `);
 
@@ -70,24 +75,71 @@ export class ChatService {
                 await this.userClient.createOrUpdateUser({
                     user,
                     callback: async (userName: string) => {
+                        await this.kafka.produce({
+                            topic: user.currentRoom as string,
+                            message: {
+                                id: uuidv4(),
+                                user: user.name,
+                                message: `User ${user.name} registered.`,
+                                room: user.currentRoom as string
+                            }
+                        });
+
                         await this.io.to(user.currentRoom as string).emit('register',`User ${userName} registered.`)
                     }
                 });
+
             });
 
             socket.on(ChatEvent.JOIN, async (user: User) => {   
                 await socket.join(user.currentRoom);
+
+                await this.kafka.produce({
+                    topic: user.currentRoom as string,
+                    message: {
+                        id: uuidv4(),
+                        user: user.name,
+                        message: `${user.name} joined room ${user.currentRoom}`,
+                        room: user.currentRoom as string
+                    }
+                });
+
                 await this.io.to(user.currentRoom as string).emit('join', `${user.name} joined room ${user.currentRoom}`);
     
             });
 
             socket.on(ChatEvent.MESSAGE, async (message: Message) => {
-                await this.io.to(message.room).emit('message', `${new Date().toISOString()} - ${message.user}: ${message.message}`);
+
+                const messageString = `${new Date().toISOString()} - ${message.user}: ${message.message}`
+                await this.kafka.produce({
+                    topic: message.room,
+                    message: {
+                        id: uuidv4(),
+                        user: message.user,
+                        message: messageString,
+                        room: message.room
+                    }
+                });
+
+
+                await this.io.to(message.room).emit('message', messageString);
                 
             });
 
             socket.on(ChatEvent.LEAVE, async (user: User) => {
-                await this.io.to(user.currentRoom as string).emit('leave', `User - ${user.name} - left room.`);
+
+                const messageString = `User - ${user.name} - left room.`;
+                await this.kafka.produce({
+                    topic: user.currentRoom as string,
+                    message: {
+                        id: uuidv4(),
+                        user: user.name,
+                        message: messageString,
+                        room: user.currentRoom as string
+                    }
+                });
+
+                await this.io.to(user.currentRoom as string).emit('leave', messageString);
                 await socket.disconnect();
             });
 
